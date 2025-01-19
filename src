@@ -1,0 +1,93 @@
+import requests
+import validators
+from urllib.parse import urlparse
+import socket
+import ssl
+import whois
+from datetime import datetime
+import re
+
+class URLSecurityScanner:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        # Common patterns for suspicious URLs
+        self.suspicious_patterns = [
+            r'password',
+            r'login',
+            r'bank',
+            r'verify',
+            r'secure',
+            r'account'
+        ]
+
+    def scan_url(self, url):
+        results = {
+            'url': url,
+            'is_valid': False,
+            'ssl_secure': False,
+            'suspicious_patterns': [],
+            'domain_age': None,
+            'response_code': None,
+            'risk_score': 0
+        }
+
+        # Validate URL format
+        if not validators.url(url):
+            results['error'] = "Invalid URL format"
+            return results
+
+        results['is_valid'] = True
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+
+        # Check SSL certificate
+        try:
+            ssl_context = ssl.create_default_context()
+            with socket.create_connection((domain, 443)) as sock:
+                with ssl_context.wrap_socket(sock, server_hostname=domain) as ssock:
+                    cert = ssock.getpeercert()
+                    results['ssl_secure'] = True
+        except:
+            results['ssl_secure'] = False
+            results['risk_score'] += 30
+
+        # Check domain age
+        try:
+            domain_info = whois.whois(domain)
+            if domain_info.creation_date:
+                creation_date = domain_info.creation_date
+                if isinstance(creation_date, list):
+                    creation_date = creation_date[0]
+                domain_age = (datetime.now() - creation_date).days
+                results['domain_age'] = domain_age
+                if domain_age < 30:
+                    results['risk_score'] += 20
+        except:
+            results['domain_age'] = None
+            results['risk_score'] += 10
+
+        # Check for suspicious patterns
+        for pattern in self.suspicious_patterns:
+            if re.search(pattern, url, re.IGNORECASE):
+                results['suspicious_patterns'].append(pattern)
+                results['risk_score'] += 5
+
+        # Check HTTP response
+        try:
+            response = requests.get(url, headers=self.headers, timeout=5)
+            results['response_code'] = response.status_code
+        except:
+            results['response_code'] = None
+            results['risk_score'] += 10
+
+        return results
+
+    def get_risk_level(self, risk_score):
+        if risk_score < 20:
+            return "Low Risk"
+        elif risk_score < 40:
+            return "Medium Risk"
+        else:
+            return "High Risk" 
